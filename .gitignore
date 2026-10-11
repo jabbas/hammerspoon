@@ -1,0 +1,7 @@
+localconfig.lua
+# lokalne archiwa ~/.hammerspoon sprzed migracji (token, .bak) - NIGDY do gita
+/macbook/
+/macmini/
+*.bak
+*.bak.*
+.DS_Store
