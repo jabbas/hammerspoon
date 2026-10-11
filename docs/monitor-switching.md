@@ -22,7 +22,7 @@ Cel: lewy monitor przechodzi na Miniego lub MacBooka na podstawie zasady **„os
 
 - **DDC działa tylko przez DisplayPort.** Przez wbudowane HDMI M1 Mini polecenia DDC są ignorowane albo kończą się błędem `device offline`.
 - **P2715Q zrywa łącze DP na nieaktywnym wejściu.** Gdy lewy pokazuje mini DP (MacBook), Mac mini **nie widzi** lewego monitora, i odwrotnie.
-- W efekcie **każdy komputer może tylko „oddać" lewy monitor drugiemu**, niggo go sobie „zabrać":
+- W efekcie **każdy komputer może tylko „oddać" lewy monitor drugiemu**, nigdy go sobie „zabrać":
   - Mac mini (gdy lewy pokazuje Miniego): `set input 16` → lewy idzie do MacBooka.
   - MacBook (gdy lewy pokazuje MacBooka): `set input 15` → lewy idzie do Miniego.
 - Po udanym przełączeniu `m1ddc` często zwraca `DDC communication failure: (iokit/common) no such device`. **To jest oczekiwane**: monitor znika w trakcie polecenia, ale przełączenie się udaje.
@@ -121,7 +121,7 @@ Na MacBooku wpis `(null)` to wbudowany ekran. Lewy to `DELL P2715Q`.
 
 UUID można też sprawdzić w Hammerspoonie: `hs.screen:getUUID()`.
 
-Jeśli UUID różnią się od tabeli w sekcji 1, użyj aktualnych.
+Jeśli UUID różnią się od tabeli w sekcji 1, użyj aktualnych (popraw je w stałej `LEFT` w `roles/mini.lua` i `roles/macbook.lua`, sekcja 3.6).
 
 ### 3.4. Hostname Miniego
 
@@ -159,7 +159,7 @@ Kod jest w repozytorium — dokument go nie powiela:
 | `roles/mini.lua` | serwer HTTP i stan `monitorOwner` (Mac mini) |
 | `roles/macbook.lua` | watcher zdarzeń, odpytywanie `/owner`, obsługa klapy (MacBook) |
 
-Na każdej maszynie:
+Na każdej maszynie (klon wymaga nieistniejącego lub pustego `~/.hammerspoon` — istniejącą konfigurację najpierw odsuń, np. `mv ~/.hammerspoon ~/.hammerspoon.old`):
 
 ```bash
 git clone git@github.com:jabbas/hammerspoon.git ~/.hammerspoon
@@ -262,7 +262,7 @@ m1ddc display list
 |---|---|
 | `The specified display does not exist` | Monitor pokazuje inne wejście (łącze DP zerwane) albo zmienił się UUID → `m1ddc display list`. |
 | `device offline` / `no such device` po przełączeniu | Normalne, przełączenie się udało. |
-| Lewy na 30 Hz na MacBooku | macOS wybrał 30 Hz w trybie „looks like 3008x1692" → Ustawienia → Monitory → 60 Hz. **Nie** jest to wina MST ani adaptera. Inne możliwe przyczyny: reset fabryczny monitora cofnął HDMI 2.0 (lewty na HDMI Miniego), albo MST włączone (DP). |
+| Lewy na 30 Hz na MacBooku | macOS wybrał 30 Hz w trybie „looks like 3008x1692" → Ustawienia → Monitory → 60 Hz. **Nie** jest to wina MST ani adaptera. Inne możliwe przyczyny: reset fabryczny monitora cofnął HDMI 2.0 (lewy na HDMI Miniego), albo MST włączone (DP). |
 | `hs.screen:availableModes()` zwraca pustą listę | Znany problem na tej wersji Hammerspoona/macOS — nie polegaj na tej funkcji. |
 | `m1ddc` na MacBooku kończy się segfault (exit 139) | Gdy wyświetlacze MacBooka śpią, `hs.screen` trzyma nieaktualny wpis dla lewego monitora. Konfiguracja chroni się flagą `monitorActive`. |
 | `hs -c` zwraca „can't access Hammerspoon message port" | `hs.ipc` nie załadowane lub Hammerspoon nie działa. |
