@@ -1,7 +1,6 @@
--- Skopiuj do localconfig.lua (plik jest poza gitem) i uzupełnij.
--- token: `openssl rand -hex 16`, ten sam na obu maszynach.
+-- Skopiuj do localconfig.lua (plik jest poza gitem, chmod 600) i uzupełnij.
+-- secret: `openssl rand -hex 32` (64 znaki hex), ten sam na obu maszynach.
 return {
-  role     = "macbook",                    -- "mini" albo "macbook"
-  token    = "__TOKEN__",
-  mini_url = "http://__MINI_HOST__:8765",  -- tylko dla roli "macbook", np. http://mini.local:8765
+  node   = "__NODE__",     -- "mini" albo "macbook" (klucze z bloku displays w init.lua)
+  secret = "__SECRET__",
 }

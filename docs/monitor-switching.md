@@ -1,258 +1,119 @@
 # Automatyczne przełączanie lewego monitora: Mac mini ↔ MacBook
 
-Instrukcja dla agenta (lub osoby), który może uruchamiać polecenia na **Mac mini** i na **MacBooku**.
-Cel: lewy monitor przechodzi na Miniego lub MacBooka na podstawie zasady **„ostatnio wybudzony wygrywa"** — kto się obudził / odblokował, ten trzyma lewy monitor.
+Lewy monitor przechodzi na Miniego lub MacBooka na zasadzie **„ostatnio aktywny wygrywa”**: kto się obudził lub odblokował, ten trzyma lewy monitor. Przełączanie robi Spoon [DisplayKVM](https://github.com/jabbas/DisplayKVM), dołączony do tego repozytorium jako submoduł `Spoons/DisplayKVM.spoon`.
 
 ---
 
-## 1. Stan sprzętu (zweryfikowany ręcznie, nie zmieniaj okablowania)
+## 1. Sprzęt
+
+Stan zweryfikowany ręcznie — nie zmieniaj okablowania.
 
 | Monitor | Model | Mac mini | MacBook |
 |---|---|---|---|
 | **Lewy** | Dell P2715Q (rev. A03) | USB-C → **DisplayPort** (wejście DP, kod DDC **15**) | USB-C → DP → **mini DisplayPort** (kod DDC **16**) |
 | **Prawy** | Dell P2715Q | **HDMI** (kod DDC 17), 60 Hz | — |
 
-- Mac mini: M1, użytkownik `jabbas`, host `mini` (adresy `mini.home` i `mini.local`).
-- MacBook: Pro 13" M2 (służbowy), użytkownik `<użytkownik MacBooka>`, host `<host MacBooka>`.
+- Mac mini: M1, host `mini` (adres `mini.local`).
+- MacBook: Pro 13" M2 (służbowy), host `<host MacBooka>`, użytkownik `<użytkownik MacBooka>`.
 - W obu monitorach **MST = Off** (z MST On DisplayPort działa tylko w 30 Hz, macOS nie obsługuje MST).
-- W lewym monitorze **włączone HDMI 2.0** (ukryta opcja „Disable HDMI 1.4 support"). Reset fabryczny monitora ją cofa.
+- W lewym monitorze **włączone HDMI 2.0** (ukryta opcja „Disable HDMI 1.4 support”). Reset fabryczny monitora ją cofa.
 - DDC/CI włączone w obu monitorach.
+- W OSD lewego monitora wyłączone automatyczne wybieranie wejścia — inaczej monitor sam wraca na poprzednie wejście.
 
 ### Ustalone zachowanie (z testów)
 
 - **DDC działa tylko przez DisplayPort.** Przez wbudowane HDMI M1 Mini polecenia DDC są ignorowane albo kończą się błędem `device offline`.
-- **P2715Q zrywa łącze DP na nieaktywnym wejściu.** Gdy lewy pokazuje mini DP (MacBook), Mac mini **nie widzi** lewego monitora, i odwrotnie.
-- W efekcie **każdy komputer może tylko „oddać" lewy monitor drugiemu**, nigdy go sobie „zabrać":
-  - Mac mini (gdy lewy pokazuje Miniego): `set input 16` → lewy idzie do MacBooka.
-  - MacBook (gdy lewy pokazuje MacBooka): `set input 15` → lewy idzie do Miniego.
+- **P2715Q zrywa łącze DP na nieaktywnym wejściu.** Gdy lewy pokazuje mini DP (MacBook), Mac mini **nie widzi** lewego monitora, i odwrotnie (potwierdzone testem 2026-10-14: oba kierunki `HIDDEN`). Dlatego w konfiguracji nie ma opcji `pull` (zostaje domyślna): przejęcie z nieaktywnego wejścia i tak nie zajdzie, więc DisplayKVM prosi bieżącego właściciela, żeby oddał monitor.
 - Po udanym przełączeniu `m1ddc` często zwraca `DDC communication failure: (iokit/common) no such device`. **To jest oczekiwane**: monitor znika w trakcie polecenia, ale przełączenie się udaje.
 - Numery wyświetlaczy (`display 1`, `display 2`) **zmieniają się**. Zawsze używaj **UUID**.
 
-### UUID (stan na 2026-10-10; zweryfikuj w kroku 3.3)
+### UUID
 
 | Komputer | Lewy monitor (DP / mini DP) | Prawy monitor |
 |---|---|---|
 | Mac mini | `1B5F0426-EFF5-4986-ABCE-67B1F3E2FF67` | `B6AEAC4A-F7B9-48AA-A437-B9E44A47848D` (HDMI) |
 | MacBook | `F10F3853-1195-47E4-B1B9-EDA17BE38872` | — |
 
-UUID mogą się zmienić po przepięciu kabla do innego portu lub zmianie ustawień MST.
+UUID mogą się zmienić po przepięciu kabla do innego portu lub zmianie ustawień MST. Weryfikacja (lewy musi pokazywać dany komputer):
 
----
+```bash
+m1ddc display list     # na MacBooku wpis (null) to wbudowany ekran; lewy to DELL P2715Q
+hs -c 'for _, s in ipairs(hs.screen.allScreens()) do print(s:name(), s:getUUID()) end'
+```
 
-## 2. Architektura rozwiązania
-
-**Zasada: „ostatnio wybudzony wygrywa".** Kto się obudził lub odblokował, ten trzyma lewy monitor.
-
-- **Mac mini** jest arbitrem — trzyma zmienną `monitorOwner` (`mini` | `macbook`).
-- **Serwer HTTP na Minim**, port **8765**, wszystkie routy wymagają `?token=<TOKEN>`. Zły token → 403, nieznana routa → 404:
-  - `GET /owner` → zwraca `mini` lub `macbook`.
-  - `GET /claim/macbook` → owner = macbook, Mini przełącza lewy na MacBooka (`m1ddc display <LEFT> set input 16`).
-  - `GET /claim/mini` → owner = mini.
-- **MacBook** nie ma serwera — polluje Miniego co **2 s** (`GET /owner`). Nie wymaga otwartego portu (korporacyjne MDM/firewall). Koszt: do ~2 s opóźnienia przy wybudzaniu Miniego. Poza domem zapytania po cichu się nie udają; timeout 15 s na każde zapytanie (strażnik `inflight`).
-
-### Tabela zdarzeń
-
-| Gdzie | Zdarzenie | Działanie |
-|---|---|---|
-| Mini | wybudzenie ekranów / odblokowanie / `systemDidWake`, tylko gdy `hs.host.idleTime() < 5` | owner = mini |
-| Mini | start Hammerspoona: idle < 30 s → owner = mini; inaczej owner wg stanu faktycznego | — |
-| MacBook | blokada / wygaszenie ekranu / usypianie systemu | oddaje lewy (input 15) + `/claim/mini` |
-| MacBook | zamknięcie klapy (AppleClamshellState No→Yes) | oddaje lewy; macOS sam usypia MacBooka |
-| MacBook | odblokowanie | `/claim/macbook` |
-| MacBook | wybudzenie bez blokady (idle < 5) lub otwarcie klapy bez blokady | `/claim/macbook` |
-| MacBook | start Hammerspoona: odblokowany i idle < 30 s → `/claim/macbook` | — |
-| MacBook | co 2 s GET `/owner`: `mini` + MacBook aktywny i widzi lewy → oddaje; `macbook` + aktywny + nie widzi lewego → ponawia claim (max 5) | — |
-
-### Dlaczego sprawdzanie idleTime?
-
-Przełączenie wejścia monitora wygląda dla macOS jak hot-plug (display re-connect) i może wywołać zdarzenie „wake". Zliczanie tylko wybudzeń z rzeczywistym wejściem HID (idle < 5 s) zapobiega ping-pongowi. Przeładowanie Hammerspoona nie jest traktowane jako start, chyba że ktoś używał maszyny w ciągu ostatnich 30 s.
-
-### Dlaczego polling zamiast serwera na MacBooku?
-
-MacBook to laptop służbowy — polling nie wymaga otwartego portu przychodzącego (firewall/MDM). Koszt: do ~2 s opóźnienia przy wybudzaniu Miniego. Poza domem zapytania po cichu się nie udają.
-
-### Semantyka blokady (wybór użytkownika)
-
-Zablokowanie MacBooka oddaje lewy Miniemu. Wybudzenie MacBooka do ekranu blokady nic nie robi — dopiero odblokowanie przejmuje lewy.
-
-### Zamknięcie klapy
-
-Z zasilaczem AC i podłączonym monitorem zewnętrznym macOS wchodzi w tryb clamshell i nie generuje zdarzenia lock/sleep — stąd jawny watcher klapy (`hs.screen.watcher` + `ioreg` AppleClamshellState, debounce 1.5 s). Konsekwencja: praca na MacBooku z zamkniętą klapą na lewym monitorze **nie jest wspierana**.
+Jeśli UUID się różnią, popraw je w bloku `displays` w `init.lua`.
 
 ### Mac mini — bez pełnego usypiania systemu
 
-Mini **nigdy nie powinien przechodzić w usypianie systemu** (tylko usypianie ekranu). Sprawdź: `pmset -g` → `sleep 0`, `displaysleep 5`. Jeśli trzeba: `sudo pmset -a sleep 0` lub Ustawienia → Energia → „Zapobiegaj automatycznemu usypianiu, gdy ekran jest wyłączony".
+Mini **nigdy nie powinien przechodzić w usypianie systemu** (tylko usypianie ekranu), inaczej nie odpowie MacBookowi. Sprawdź: `pmset -g` → `sleep 0`, `displaysleep 5`. Jeśli trzeba: `sudo pmset -a sleep 0` lub Ustawienia → Energia → „Zapobiegaj automatycznemu usypianiu, gdy ekran jest wyłączony”.
 
 ---
 
-## 3. Kroki
+## 2. Jak to działa teraz
 
-### 3.1. Oba komputery: zależności
+DisplayKVM nie ma serwera ani lidera: oba Maki to **równorzędne węzły** (`mini`, `macbook`). Znajdują się przez Bonjour w sieci lokalnej, rozmawiają bezpośrednio i podpisują każdą wiadomość wspólnym sekretem (uwierzytelnienie, bez szyfrowania — tylko zaufana sieć). Każdy węzeł replikuje niewielki stan: kto jest właścicielem lewego monitora i który Mac jest aktywny.
 
-```bash
-brew list m1ddc >/dev/null 2>&1 || brew install m1ddc
-brew list --cask hammerspoon >/dev/null 2>&1 || brew install --cask hammerspoon
-which m1ddc   # oczekiwane: /opt/homebrew/bin/m1ddc
-```
+- Mac, który się **odblokował, wybudził lub wystartował** (przy realnej aktywności użytkownika, nie przy samym hot-plugu monitora), przełącza lewy monitor na swoje wejście. Gdy sam go nie widzi, prosi bieżącego właściciela o oddanie.
+- Mac, który się **zablokował, uśpił lub zamknął klapę**, oddaje lewy monitor ostatnio aktywnemu drugiemu Makowi, a gdy nikt inny nie jest aktywny — do `home` (Mini). Jeśli sam jest `home`, zachowuje monitor.
+- Oddanie do `home` nie wymaga, żeby Mini był wybudzony; następne przejęcie naprawia stan.
+- Semantyka blokady: wybudzenie MacBooka do ekranu blokady nic nie robi — dopiero odblokowanie przejmuje lewy. Praca na MacBooku z zamkniętą klapą na lewym monitorze (clamshell) **nie jest wspierana**.
+- Progi aktywności: `userIdle = 5` s (wybudzenie liczy się tylko przy realnym wejściu HID — to chroni przed ping-pongiem wywołanym przełączeniem wejścia), `startIdle = 30` s (przeładowanie Hammerspoona nie jest startem, chyba że ktoś używał maszyny w ciągu ostatnich 30 s).
+- Skrót `ctrl+alt+cmd+M` przejmuje lewy monitor na bieżącym Macu.
 
-Jeśli ścieżka jest inna, popraw stałą `M1DDC` w `lib/monitor.lua` (sekcja 3.6).
+Szczegóły działania, protokół i przypadki brzegowe: [README DisplayKVM](https://github.com/jabbas/DisplayKVM#readme) oraz [docs/design.md](https://github.com/jabbas/DisplayKVM/blob/main/docs/design.md).
 
-### 3.2. Wygeneruj token (raz, ten sam na obu komputerach)
+---
 
-```bash
-openssl rand -hex 16
-```
+## 3. Konfiguracja
 
-Wstaw wynik jako `token` w `localconfig.lua` na obu komputerach (sekcja 3.6).
-
-### 3.3. Zweryfikuj UUID lewego monitora
-
-**Mac mini** (lewy musi pokazywać Miniego):
-```bash
-m1ddc display list
-```
-
-**MacBook** (lewy musi pokazywać MacBooka):
-```bash
-m1ddc display list
-```
-
-Na MacBooku wpis `(null)` to wbudowany ekran. Lewy to `DELL P2715Q`.
-
-UUID można też sprawdzić w Hammerspoonie: `hs.screen:getUUID()`.
-
-Jeśli UUID różnią się od tabeli w sekcji 1, użyj aktualnych (popraw je w stałej `LEFT` w `roles/mini.lua` i `roles/macbook.lua`, sekcja 3.6).
-
-### 3.4. Hostname Miniego
-
-Na Mac mini:
-```bash
-scutil --get LocalHostName   # np. "mini" → adres mini.local
-ipconfig getifaddr en0       # zapasowo adres IP
-```
-
-Na MacBooku sprawdź osiągalność: `ping -c 1 mini.local`. Jeśli nie działa, użyj adresu IP w `mini_url` (`localconfig.lua`, sekcja 3.6).
-
-**Uwaga:** Mini ma dwa adresy: `mini.home` i `mini.local` (różne podsieci). Konfiguracja używa `mini.local`.
-
-### 3.5. Mac mini: ustawienie zasilania
-
-```bash
-pmset -g
-```
-
-Oczekiwane: `sleep 0`, `displaysleep 5`. Jeśli `sleep > 0`:
-```bash
-sudo pmset -a sleep 0
-```
-
-Alternatywnie: Ustawienia → Energia → „Zapobiegaj automatycznemu usypianiu, gdy ekran jest wyłączony".
-
-### 3.6. Konfiguracja Hammerspoona (repozytorium)
-
-Kod jest w repozytorium — dokument go nie powiela:
+### Repozytorium
 
 | Plik | Zawartość |
 |---|---|
-| `init.lua` | wczytuje i waliduje `localconfig.lua`, uruchamia rolę |
-| `lib/monitor.lua` | stałe (`PORT`, `USER_IDLE`, `START_IDLE`), logger `monitor`, `haveScreen`, `setInput` |
-| `roles/mini.lua` | serwer HTTP i stan `monitorOwner` (Mac mini) |
-| `roles/macbook.lua` | watcher zdarzeń, odpytywanie `/owner`, obsługa klapy (MacBook) |
+| `init.lua` | wczytuje `localconfig.lua`, ładuje Spoon, konfiguruje blok `displays`, `start()`, skrót |
+| `localconfig.lua` | poza gitem, `chmod 600`: `node` (`"mini"` albo `"macbook"`) i `secret` |
+| `Spoons/DisplayKVM.spoon` | submoduł przypięty do tagu; po `pull` wymaga `git submodule update --init` |
 
-Na każdej maszynie (klon wymaga nieistniejącego lub pustego `~/.hammerspoon` — istniejącą konfigurację najpierw odsuń, np. `mv ~/.hammerspoon ~/.hammerspoon.old`):
+Blok `displays` w `init.lua` jest identyczny na obu Macach; różni się tylko `node` z `localconfig.lua`. Zawiera dla lewego monitora: `match` (UUID widziany z każdego węzła), `inputs` (`mini = 15`, `macbook = 16`) i `home = "mini"`. Backend: `m1ddc` (`/opt/homebrew/bin/m1ddc`). Port domyślny `8765`.
 
-```bash
-git clone git@github.com:jabbas/hammerspoon.git ~/.hammerspoon
-cp ~/.hammerspoon/localconfig.example.lua ~/.hammerspoon/localconfig.lua
-chmod 600 ~/.hammerspoon/localconfig.lua
-```
-
-`localconfig.lua` (poza gitem):
-
-| Pole | Mac mini | MacBook |
-|---|---|---|
-| `role` | `"mini"` | `"macbook"` |
-| `token` | token z kroku 3.2 | ten sam token |
-| `mini_url` | — | `http://<adres Mini>:8765`, np. `http://mini.local:8765` |
-
-UUID lewego monitora są w `roles/mini.lua` i `roles/macbook.lua` (stała `LEFT`). Jeśli krok 3.3 pokazał inne UUID, popraw tam.
-
-### 3.7. Uruchomienie Hammerspoona (oba komputery)
+Sekret (64 znaki hex, ten sam na obu Macach):
 
 ```bash
-open -a Hammerspoon
+openssl rand -hex 32
 ```
 
-Przeładowanie konfiguracji (CLI):
-```bash
-# Mac mini / MacBook lokalnie:
-hs -c "hs.reload()"
+Wpisz go do `localconfig.lua` obu maszyn. Nie umieszczaj go w repozytorium ani w dokumentacji.
 
-# Mac mini przez SSH:
-/opt/homebrew/bin/hs -c "hs.reload()"
-```
+Instalacja i aktualizacja: [README](../README.md).
 
-**Uwaga:** automatyczne przeładowanie po zapisie plików konfiguracji **nie działa** na tych maszynach. Zawsze przeładowuj ręcznie.
+### Uprawnienia macOS (akcja użytkownika)
 
-Wymaga **ręcznej akcji użytkownika** (agent nie może tego zrobić sam):
 - Ustawienia systemowe → Prywatność i ochrona → **Dostępność** → włącz Hammerspoon.
-- Na Mac mini: jeśli zapora macOS zapyta o połączenia przychodzące dla Hammerspoona → **Zezwól** (obecnie zapora wyłączona).
+- Ustawienia systemowe → Prywatność i ochrona → **Sieć lokalna** → włącz Hammerspoon (Bonjour i rozmowa z drugim Makiem).
+- Zapora macOS: jeśli zapyta o połączenia przychodzące dla Hammerspoona → **Zezwól**. Dotyczy zwłaszcza MacBooka, który wcześniej niczego nie nasłuchiwał.
 - Preferencje Hammerspoona → **Launch Hammerspoon at login**.
 
-`require("hs.ipc")` jest pierwszą linią `init.lua`, więc `hs -c` działa od razu.
+`require("hs.ipc")` jest pierwszą linią `init.lua`, więc `hs -c` działa nawet przy błędnej konfiguracji. Zapis plików konfiguracji **nie** przeładowuje Hammerspoona — zawsze przeładowuj ręcznie (`/opt/homebrew/bin/hs -c "hs.reload()"`; przez SSH `PATH` nie zawiera `/opt/homebrew/bin`).
 
 ---
 
-## 4. Testy (zweryfikowano 2026-10-11)
+## 4. Testy akceptacyjne
 
-### Endpointy (curl z dowolnego komputera)
+Obserwacja między krokami, na obu Macach: `hs -c 'return hs.inspect(spoon.DisplayKVM:status())'` oraz `hs -c 'return hs.console.getConsole()' | grep DisplayKVM | tail -5`.
 
-1. **Zły token** → 403:
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" "http://mini.local:8765/owner?token=zly"
-   ```
-2. **Brak tokena** → 403:
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" "http://mini.local:8765/owner"
-   ```
-3. **`/owner`** zwraca wartość:
-   ```bash
-   curl -s "http://mini.local:8765/owner?token=__TOKEN__"
-   ```
-4. **Nieznana routa** → 404:
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" "http://mini.local:8765/nieistnieje?token=__TOKEN__"
-   ```
+| # | Scenariusz | Oczekiwane |
+|---|---|---|
+| A1 | Odblokowanie MacBooka | lewy na MacBooku w ciągu ~3 s; `owner = macbook` na obu |
+| A2 | Blokada MacBooka (Ctrl+Cmd+Q) | lewy na Mini; `owner = mini` |
+| A3 | MacBook odblokowany (lewy na MacBooku); `pmset displaysleepnow` na Mini, potem ruch myszą przy Mini | lewy na Mini w ciągu ~3 s (prośba `request` do MacBooka) |
+| A4 | Reload Config przy pracy na MacBooku, potem Reload Config przy pracy na Mini | lewy na MacBooku, potem na Mini |
+| A5 | Zamknięcie klapy MacBooka (lewy na MacBooku); potem otwarcie klapy i odblokowanie | lewy na Mini; po odblokowaniu na MacBooku |
+| A6 | Uśpienie MacBooka (menu Apple → Uśpij) przy lewym na MacBooku; po wybudzeniu i odblokowaniu | lewy na Mini; po odblokowaniu na MacBooku |
+| A7 | Skrót `ctrl+alt+cmd+M` na Macu, który nie ma lewego | lewy przechodzi na ten Mac |
+| A8 | Wi-Fi wyłączone na MacBooku, odblokowanie; potem włączenie Wi-Fi i ponowne odblokowanie | powiadomienie „cannot claim left” (lub przejęcie przez pull, jeśli monitor widoczny); po włączeniu Wi-Fi lewy na MacBooku |
+| A9 | Logi obu maszyn po testach | brak `error`, `401`, `duplicate-node`; `status()` spójny |
 
-### Scenariusze (wymagają obserwacji fizycznej)
-
-| # | Scenariusz | Oczekiwane | Status |
-|---|---|---|---|
-| 1 | Odblokuj MacBooka | lewy przechodzi na MacBooka | ✅ |
-| 2 | Zablokuj MacBooka (Ctrl+Cmd+Q) | lewy wraca na Miniego | ✅ |
-| 3 | Wybudź MacBooka do ekranu blokady | nic się nie dzieje do odblokowania | ✅ |
-| 4 | MacBook odblokowany: `pmset displaysleepnow` na Minim, potem ruch myszką na Minim | lewy wraca na Miniego w ~2 s | ✅ |
-| 5 | Zamknij klapę MacBooka (AC + monitor) | pulpit przenosi się na lewy, ~2 s → lewy idzie do Miniego, MacBook śpi; otwórz + odblokuj → lewy wraca | ✅ |
-| 6 | Restart każdego komputera | — | ❌ nie testowano |
-
-### Jak obserwować
-
-Logi Hammerspoona (oba komputery):
-```bash
-hs -c "return hs.console.getConsole()" | grep "monitor:"
-```
-
-Każda gałąź loguje z nazwą loggera `monitor`.
-
-Endpoint właściciela:
-```bash
-curl -s "http://mini.local:8765/owner?token=__TOKEN__"
-```
-
-Lista wyświetlaczy na Minim:
-```bash
-m1ddc display list
-```
+A1–A6 są blokujące; A7–A8 można naprawiać osobno.
 
 ---
 
@@ -260,15 +121,21 @@ m1ddc display list
 
 | Objaw | Przyczyna / rozwiązanie |
 |---|---|
+| Stan węzła | `hs -c 'return hs.inspect(spoon.DisplayKVM:status())'` → `peers[...].alive`, `displays.left.owner`, `visible`, `input`. |
+| Logi | Logger `DisplayKVM` (start konfiguracji: logger `config`): `hs -c 'return hs.console.getConsole()' \| grep -E "config:\|DisplayKVM"`. Więcej szczegółów: `logLevel = "debug"` w `configure`. |
+| Drugi Mac nie jest widoczny w `status()` | Sprawdź Bonjour: `dns-sd -B _displaykvm._tcp local.` (na drugim Macu powinien być widoczny ten węzeł). |
+| Brak węzłów, Bonjour milczy | Uprawnienie **Sieć lokalna** dla Hammerspoona na obu Macach; zapora na MacBooku (połączenia przychodzące dla Hammerspoona → Zezwól). |
+| `401` lub „clock skew” w logach | Różne sekrety w `localconfig.lua` albo rozjechane zegary (włącz czas sieciowy). |
+| Powiadomienie „duplicate-node” | Oba Maki mają ten sam `node` w `localconfig.lua`. |
+| Powiadomienie „cannot listen on port” | Port zajęty przez inny program lub starą instancję Hammerspoona. |
+| Monitor sam wraca na poprzednie wejście | Wyłącz automatyczne wybieranie wejścia w OSD monitora. |
+| Brak katalogu Spoona / komunikat „brak Spoons/DisplayKVM.spoon” | `git -C ~/.hammerspoon submodule update --init`, potem przeładuj. |
 | `The specified display does not exist` | Monitor pokazuje inne wejście (łącze DP zerwane) albo zmienił się UUID → `m1ddc display list`. |
 | `device offline` / `no such device` po przełączeniu | Normalne, przełączenie się udało. |
-| Lewy na 30 Hz na MacBooku | macOS wybrał 30 Hz w trybie „looks like 3008x1692" → Ustawienia → Monitory → 60 Hz. **Nie** jest to wina MST ani adaptera. Inne możliwe przyczyny: reset fabryczny monitora cofnął HDMI 2.0 (lewy na HDMI Miniego), albo MST włączone (DP). |
-| `hs.screen:availableModes()` zwraca pustą listę | Znany problem na tej wersji Hammerspoona/macOS — nie polegaj na tej funkcji. |
-| `m1ddc` na MacBooku kończy się segfault (exit 139) | Gdy wyświetlacze MacBooka śpią, `hs.screen` trzyma nieaktualny wpis dla lewego monitora. Konfiguracja chroni się flagą `monitorActive`. |
-| `hs -c` zwraca „can't access Hammerspoon message port" | `hs.ipc` nie załadowane lub Hammerspoon nie działa. |
-| Serwer nie odpowiada | Hammerspoon na Minim nie działa, `mini.local` nie rozwiązuje się (Mini ma dwa adresy: `mini.home` i `mini.local`), Mini w pełnym usypianiu systemu (nie powinien — sprawdź `pmset -g`). |
-| Lewy nie wraca po odblokowaniu | Sprawdź log MacBooka: `claim/macbook -> <status>`, log Miniego: `owner ... -> macbook`. |
-| Zmienne globalne / garbage collector | Watchery, serwer i timery muszą być w zmiennych globalnych — inaczej Lua GC je usunie. |
+| Lewy na 30 Hz na MacBooku | macOS wybrał 30 Hz w trybie „looks like 3008x1692” → Ustawienia → Monitory → 60 Hz. Inne możliwe przyczyny: reset fabryczny monitora cofnął HDMI 2.0, albo włączone MST. |
+| `hs.screen:availableModes()` zwraca pustą listę | Znany problem tej wersji Hammerspoona/macOS — nie polegaj na tej funkcji. |
+| `hs -c` zwraca „can't access Hammerspoon message port” | `hs.ipc` nie załadowane lub Hammerspoon nie działa. |
+| Mini nie odpowiada | Mini w pełnym usypianiu systemu (nie powinien — sprawdź `pmset -g`) albo Hammerspoon nie działa. |
 
 ---
 
@@ -276,6 +143,6 @@ m1ddc display list
 
 - Nie zmieniaj okablowania ani ustawień OSD monitorów (MST, HDMI 2.0, DDC/CI) bez zgody użytkownika.
 - Nie używaj numerów wyświetlaczy zamiast UUID.
-- Nie dodawaj skrótów klawiszowych (Ctrl+Alt+Cmd+M/B itp.) — odrzucone przez użytkownika.
-- Nie wywołuj `/claim/*` przypadkowo — fizycznie przełącza monitor.
-- Nie umieszczaj prawdziwego tokena w dokumentacji ani w repozytorium.
+- Nie używaj `git clean -x` ani `-X` — usuwa `localconfig.lua` i lokalne archiwa.
+- Nie wypisuj sekretu (`cat localconfig.lua`, `echo` zmiennej) i nie umieszczaj go w dokumentacji ani w repozytorium.
+- Nie wypisuj całego obiektu Spoona (`hs.inspect(spoon.DisplayKVM)`) — zawiera sekret; używaj tylko `status()`.

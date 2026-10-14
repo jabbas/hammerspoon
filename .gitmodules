@@ -1,0 +1,3 @@
+[submodule "Spoons/DisplayKVM.spoon"]
+	path = Spoons/DisplayKVM.spoon
+	url = https://github.com/jabbas/DisplayKVM.git

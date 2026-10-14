@@ -1,5 +1,6 @@
--- Punkt wejścia. Rola i sekrety maszyny: localconfig.lua (poza gitem).
-require("hs.ipc")  -- zawsze, żeby działało `hs -c`
+-- Punkt wejścia. Przełączanie monitorów: Spoon DisplayKVM (submoduł Spoons/DisplayKVM.spoon).
+-- Nazwa węzła i sekret grupy: localconfig.lua (poza gitem).
+require("hs.ipc")  -- zawsze pierwsze, żeby działało `hs -c`
 
 local log = hs.logger.new("config", "info")
 
@@ -8,31 +9,38 @@ local function fail(msg)
   hs.notify.new({ title = "Hammerspoon", informativeText = msg }):send()
 end
 
-local REQUIRED = {
-  mini    = { "role", "token" },
-  macbook = { "role", "token", "mini_url" },
-}
-
-local ok, cfg = pcall(dofile, hs.configdir .. "/localconfig.lua")
-if not ok then
-  fail("localconfig.lua: brak lub błąd (" .. tostring(cfg) .. "); skopiuj localconfig.example.lua")
+local ok, lc = pcall(dofile, hs.configdir .. "/localconfig.lua")
+if not ok or type(lc) ~= "table" then
+  fail("localconfig.lua: brak lub błąd (" .. tostring(lc) .. "); skopiuj localconfig.example.lua")
+  return
+end
+if type(lc.node) ~= "string" or lc.node == "" or lc.node:find("__", 1, true) then
+  fail("localconfig.lua: brak pola 'node' (\"mini\" albo \"macbook\")")
   return
 end
 
-local keys = type(cfg) == "table" and REQUIRED[cfg.role] or nil
-if not keys then
-  local role = type(cfg) == "table" and tostring(cfg.role) or "?"
-  fail("localconfig.lua: nieznana rola '" .. role .. "' (dozwolone: mini, macbook)")
+local loaded, err = pcall(hs.loadSpoon, "DisplayKVM")
+if not loaded or not spoon.DisplayKVM then
+  fail("brak Spoons/DisplayKVM.spoon (" .. tostring(err)
+    .. "); uruchom: git -C ~/.hammerspoon submodule update --init")
   return
 end
 
-for _, k in ipairs(keys) do
-  local v = cfg[k]
-  if type(v) ~= "string" or v == "" or v:find("__", 1, true) then
-    fail("localconfig.lua: brak wartości lub placeholder w polu '" .. k .. "'")
-    return
-  end
-end
-
-log.i("rola: " .. cfg.role)
-require("roles." .. cfg.role)(cfg)
+log.i("węzeł: " .. lc.node)
+spoon.DisplayKVM:configure({
+  node    = lc.node,
+  secret  = lc.secret,     -- walidację (64 znaki hex) robi DisplayKVM:configure()
+  backend = "m1ddc",
+  displays = {
+    left = {
+      match  = {
+        mini    = "1B5F0426-EFF5-4986-ABCE-67B1F3E2FF67",  -- lewy widziany z Miniego (DP, wejście 15)
+        macbook = "F10F3853-1195-47E4-B1B9-EDA17BE38872",  -- lewy widziany z MacBooka (mini DP, wejście 16)
+      },
+      inputs = { mini = 15, macbook = 16 },
+      home   = "mini",
+    },
+  },
+})
+spoon.DisplayKVM:start()
+spoon.DisplayKVM:bindHotkeys({ claim = { { "ctrl", "alt", "cmd" }, "M" } })
