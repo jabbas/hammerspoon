@@ -13,7 +13,7 @@ Stan zweryfikowany ręcznie — nie zmieniaj okablowania.
 | **Lewy** | Dell P2715Q (rev. A03) | USB-C → **DisplayPort** (wejście DP, kod DDC **15**) | USB-C → DP → **mini DisplayPort** (kod DDC **16**) |
 | **Prawy** | Dell P2715Q | **HDMI** (kod DDC 17), 60 Hz | — |
 
-- Mac mini: M1, host `mini` (adres `mini.local`).
+- Mac mini: M1, host `<host Mini>`.
 - MacBook: Pro 13" M2 (służbowy), host `<host MacBooka>`, użytkownik `<użytkownik MacBooka>`.
 - W obu monitorach **MST = Off** (z MST On DisplayPort działa tylko w 30 Hz, macOS nie obsługuje MST).
 - W lewym monitorze **włączone HDMI 2.0** (ukryta opcja „Disable HDMI 1.4 support”). Reset fabryczny monitora ją cofa.
@@ -56,8 +56,8 @@ DisplayKVM nie ma serwera ani lidera: oba Maki to **równorzędne węzły** (`mi
 - Mac, który się **odblokował, wybudził lub wystartował** (przy realnej aktywności użytkownika, nie przy samym hot-plugu monitora), przełącza lewy monitor na swoje wejście. Gdy sam go nie widzi, prosi bieżącego właściciela o oddanie.
 - Mac, który się **zablokował, uśpił lub zamknął klapę**, oddaje lewy monitor ostatnio aktywnemu drugiemu Makowi, a gdy nikt inny nie jest aktywny — do `home` (Mini). Jeśli sam jest `home`, zachowuje monitor.
 - Oddanie do `home` nie wymaga, żeby Mini był wybudzony; następne przejęcie naprawia stan.
-- Semantyka blokady: wybudzenie MacBooka do ekranu blokady nic nie robi — dopiero odblokowanie przejmuje lewy. Praca na MacBooku z zamkniętą klapą na lewym monitorze (clamshell) **nie jest wspierana**.
-- Progi aktywności: `userIdle = 5` s (wybudzenie liczy się tylko przy realnym wejściu HID — to chroni przed ping-pongiem wywołanym przełączeniem wejścia), `startIdle = 30` s (przeładowanie Hammerspoona nie jest startem, chyba że ktoś używał maszyny w ciągu ostatnich 30 s).
+- Semantyka blokady: wybudzenie MacBooka do ekranu blokady nic nie robi — dopiero odblokowanie przejmuje lewy. Domyślnie zamknięcie klapy oddaje monitor (`activity.lid = true`); praca w trybie clamshell wymagałaby `activity = { lid = false }` w `init.lua`.
+- Progi aktywności (domyślne wartości DisplayKVM, nieustawiane w `init.lua`): `userIdle = 5` s (wybudzenie liczy się tylko przy realnym wejściu HID — to chroni przed ping-pongiem wywołanym przełączeniem wejścia), `startIdle = 30` s (przeładowanie Hammerspoona nie jest startem, chyba że ktoś używał maszyny w ciągu ostatnich 30 s).
 - Skrót `ctrl+alt+cmd+M` przejmuje lewy monitor na bieżącym Macu.
 
 Szczegóły działania, protokół i przypadki brzegowe: [README DisplayKVM](https://github.com/jabbas/DisplayKVM#readme) oraz [docs/design.md](https://github.com/jabbas/DisplayKVM/blob/main/docs/design.md).
@@ -90,6 +90,7 @@ Instalacja i aktualizacja: [README](../README.md).
 
 - Ustawienia systemowe → Prywatność i ochrona → **Dostępność** → włącz Hammerspoon.
 - Ustawienia systemowe → Prywatność i ochrona → **Sieć lokalna** → włącz Hammerspoon (Bonjour i rozmowa z drugim Makiem).
+- Ustawienia systemowe → **Powiadomienia** → Hammerspoon → **Zezwalaj** (błędy `init.lua` i ostrzeżenia DisplayKVM to powiadomienia macOS).
 - Zapora macOS: jeśli zapyta o połączenia przychodzące dla Hammerspoona → **Zezwól**. Dotyczy zwłaszcza MacBooka, który wcześniej niczego nie nasłuchiwał.
 - Preferencje Hammerspoona → **Launch Hammerspoon at login**.
 
@@ -110,7 +111,7 @@ Obserwacja między krokami, na obu Macach: `hs -c 'return hs.inspect(spoon.Displ
 | A5 | Zamknięcie klapy MacBooka (lewy na MacBooku); potem otwarcie klapy i odblokowanie | lewy na Mini; po odblokowaniu na MacBooku |
 | A6 | Uśpienie MacBooka (menu Apple → Uśpij) przy lewym na MacBooku; po wybudzeniu i odblokowaniu | lewy na Mini; po odblokowaniu na MacBooku |
 | A7 | Skrót `ctrl+alt+cmd+M` na Macu, który nie ma lewego | lewy przechodzi na ten Mac |
-| A8 | Wi-Fi wyłączone na MacBooku, odblokowanie; potem włączenie Wi-Fi i ponowne odblokowanie | powiadomienie „cannot claim left” (lub przejęcie przez pull, jeśli monitor widoczny); po włączeniu Wi-Fi lewy na MacBooku |
+| A8 | Wi-Fi wyłączone na MacBooku, odblokowanie; potem włączenie Wi-Fi i ponowne odblokowanie | tylko powiadomienie „cannot claim left” (monitor nie jest widoczny na nieaktywnym wejściu, zob. §1); po włączeniu Wi-Fi lewy na MacBooku |
 | A9 | Logi obu maszyn po testach | brak `error`, `401`, `duplicate-node`; `status()` spójny |
 
 A1–A6 są blokujące; A7–A8 można naprawiać osobno.
@@ -122,10 +123,11 @@ A1–A6 są blokujące; A7–A8 można naprawiać osobno.
 | Objaw | Przyczyna / rozwiązanie |
 |---|---|
 | Stan węzła | `hs -c 'return hs.inspect(spoon.DisplayKVM:status())'` → `peers[...].alive`, `displays.left.owner`, `visible`, `input`. |
-| Logi | Logger `DisplayKVM` (start konfiguracji: logger `config`): `hs -c 'return hs.console.getConsole()' \| grep -E "config:\|DisplayKVM"`. Więcej szczegółów: `logLevel = "debug"` w `configure`. |
+| Logi | Logger `DisplayKVM` (start konfiguracji: logger `config`): wynik `hs -c 'return hs.console.getConsole()'` przefiltruj przez `grep -e config: -e DisplayKVM`. Więcej szczegółów: `logLevel = "debug"` w `configure`. |
 | Drugi Mac nie jest widoczny w `status()` | Sprawdź Bonjour: `dns-sd -B _displaykvm._tcp local.` (na drugim Macu powinien być widoczny ten węzeł). |
 | Brak węzłów, Bonjour milczy | Uprawnienie **Sieć lokalna** dla Hammerspoona na obu Macach; zapora na MacBooku (połączenia przychodzące dla Hammerspoona → Zezwól). |
 | `401` lub „clock skew” w logach | Różne sekrety w `localconfig.lua` albo rozjechane zegary (włącz czas sieciowy). |
+| Brak powiadomień/ostrzeżeń, tylko wpisy w konsoli | Włącz Powiadomienia dla Hammerspoona (Ustawienia systemowe → Powiadomienia → Hammerspoon → Zezwalaj). |
 | Powiadomienie „duplicate-node” | Oba Maki mają ten sam `node` w `localconfig.lua`. |
 | Powiadomienie „cannot listen on port” | Port zajęty przez inny program lub starą instancję Hammerspoona. |
 | Monitor sam wraca na poprzednie wejście | Wyłącz automatyczne wybieranie wejścia w OSD monitora. |
