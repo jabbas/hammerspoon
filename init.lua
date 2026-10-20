@@ -33,12 +33,14 @@ spoon.DisplayKVM:configure({
   backend = "m1ddc",
   displays = {
     left = {
-      match  = {
-        mini    = "1B5F0426-EFF5-4986-ABCE-67B1F3E2FF67",  -- lewy widziany z Miniego (DP, wejście 15)
-        macbook = "F10F3853-1195-47E4-B1B9-EDA17BE38872",  -- lewy widziany z MacBooka (mini DP, wejście 16)
+      match    = {
+        mini    = "E321F73C-9A55-44D8-A1E1-FEED1B9C4EE0",  -- lewy widziany z Miniego (HDMI, wejście 17)
+        macbook = "EE2BE0B3-F2B2-4ECF-94B2-723446299A1C",  -- lewy widziany z MacBooka (USB-C, wejście 21)
       },
-      inputs = { mini = 15, macbook = 16 },
-      home   = "mini",
+      inputs   = { mini = 17, macbook = 21 },
+      home     = "mini",
+      control  = { "macbook" },          -- HDMI w Mac mini M1 nie ma DDC (pomiar 2026-10-20)
+      whenAway = { mini = "mirror" },    -- gdy lewy pokazuje MacBooka, Mini dubluje na nim prawy
     },
   },
 })
