@@ -21,6 +21,8 @@ Stan zweryfikowany ręcznie (2026-10-20) — nie zmieniaj okablowania.
 ### Ustawienia monitorów (OSD) i systemu
 
 - **Auto-Switch Input: włączony** na obu monitorach. To siatka bezpieczeństwa: po wypięciu kabla USB-C (utracie sygnału) monitor sam przechodzi na HDMI (Mini). Nie reaguje na samo uśpienie ekranu MacBooka.
+- **USB host lewego monitora: na stałe „USB-C1 (Thunderbolt 4)”** (MacBook), czyli Auto-Switch USB Host wyłączony. Powód: przewodowa sieć MacBooka to karta Ethernet wbudowana w lewy monitor (w macOS „HP LAN”), podłączona tym samym kablem USB-C. Przy fabrycznym ustawieniu KVM hub USB monitora (razem z Ethernetem) przechodził wraz z wejściem do Miniego, więc MacBook przy każdym oddaniu monitora tracił sieć, a DisplayKVM — kontakt z nim (Mini poprawiał stan dopiero po ok. 2 min). Mini nie korzysta z niczego, co jest podłączone do lewego monitora.
+- **Wi-Fi na MacBooku włączone** w sieci domowej jako zapas: po wypięciu kabla USB-C Ethernet monitora znika razem z nim, a MacBook dalej może powiadomić Miniego.
 - **Power Mode: Performance** (zalecenie HP dla komputerów bez baterii). Ustawienia zasilania monitora nie zrywają łącza HDMI do Miniego.
 - Profil kolorów musi pasować do trybu monitora: **sRGB w monitorze i w macOS** na obu Macach; **HDR wyłączony** na obu Macach (inaczej obraz ma pomarańczowy odcień).
 - DDC/CI włączone w monitorach.
@@ -62,7 +64,8 @@ DisplayKVM nie ma serwera ani lidera: oba Maki to **równorzędne węzły** (`mi
 - Mac, który się **odblokował, wybudził lub wystartował** (przy realnej aktywności użytkownika, nie przy samym hot-plugu monitora), przełącza lewy monitor na swoje wejście. **MacBook** (węzeł z `control`) robi to sam przez DDC. **Mini** nie ma DDC, więc **prosi MacBooka** (`request`), żeby przełączył lewy na HDMI.
 - Mac, który się **zablokował, uśpił lub zamknął klapę**, oddaje lewy monitor ostatnio aktywnemu drugiemu Makowi, a gdy nikt inny nie jest aktywny — do `home` (Mini). Samo przełączenie zawsze wykonuje MacBook.
 - **Lustro**: gdy właścicielem lewego jest MacBook, Mini włącza lustro (`whenAway = { mini = "mirror" }`); gdy Mini odzyskuje monitor — wyłącza je. Dotyczy też startu, przeładowania i `stop()`.
-- **Odzyskiwanie bez DDC**: MacBook, który był właścicielem i przestał widzieć monitor (wypięty kabel USB-C — Auto-Switch przeszedł na HDMI), zapisuje `owner = mini` bez DDC. Mini (`home`), gdy żaden węzeł z `control` nie jest żywy, a właścicielem w stanie jest nieżywy węzeł, przejmuje własność w stanie i wyłącza lustro.
+- **Odzyskiwanie bez DDC**: MacBook, który był właścicielem i przestał widzieć monitor (wypięty kabel USB-C — Auto-Switch przeszedł na HDMI), zapisuje `owner = mini` bez DDC i rozgłasza to przez Wi-Fi — Mini wyłącza lustro od razu. Mini (`home`), gdy żaden węzeł z `control` nie jest żywy, a właścicielem w stanie jest nieżywy węzeł, przejmuje własność w stanie i wyłącza lustro. Jeśli MacBook po wypięciu kabla nie ma sieci (Wi-Fi wyłączone), nie powiadomi Miniego: monitor i tak sam przechodzi na HDMI, ale Mini trzyma lustro jeszcze ok. 1–2 min, do tej drugiej naprawy.
+- **Start Miniego**: po starcie lub przeładowaniu Mini nie uznaje lewego za swój, dopóki nie usłyszy MacBooka (ponowienia przez ok. 22 s). Dopiero gdy MacBooka nie ma, zakłada, że lewy pokazuje Miniego (wpis info `no controller reachable … assuming it shows this node`).
 - Oddanie do `home` nie wymaga, żeby Mini był wybudzony; następne przejęcie naprawia stan.
 - Semantyka blokady: wybudzenie MacBooka do ekranu blokady nic nie robi — dopiero odblokowanie przejmuje lewy. Domyślnie zamknięcie klapy oddaje monitor (`activity.lid = true`); praca w trybie clamshell wymagałaby `activity = { lid = false }` w `init.lua`.
 - Progi aktywności (domyślne wartości DisplayKVM, nieustawiane w `init.lua`): `userIdle = 5` s (wybudzenie liczy się tylko przy realnym wejściu HID — to chroni przed ping-pongiem wywołanym przełączeniem wejścia), `startIdle = 30` s (przeładowanie Hammerspoona nie jest startem, chyba że ktoś używał maszyny w ciągu ostatnich 30 s).
@@ -75,7 +78,9 @@ DisplayKVM nie ma serwera ani lidera: oba Maki to **równorzędne węzły** (`mi
 - **Ponowne wpięcie kabla USB-C nie przejmuje lewego z powrotem** — po wypięciu monitor jest u Miniego; MacBook przejmie go dopiero przy następnym odblokowaniu/skrócie.
 - **MacBook zawieszony lub rozładowany z wpiętym kablem**: monitor zasypia razem z nim (Auto-Switch nie reaguje na uśpienie ekranu). Po minucie lub dwóch Mini poprawi stan i wyłączy lustro, ale obraz wróci dopiero po przełączeniu wejścia przyciskami monitora albo wypięciu kabla.
 - Lustro to systemowe dublowanie ekranów: chwilowo przeładowuje układ (migotanie, przesuwanie okien). Odzyskiwanie lustra po awarii/przeładowaniu bez `stop()` jest heurystyką.
-- Wersje 0.1.x nie znają `control` — **oba Maki muszą mieć tę samą wersję** Spoona.
+- **MacBook poza domem** (bez monitora i bez Miniego): każde odblokowanie kończy się po ok. 22 s błędem `cannot claim left` i powiadomieniem. Nieszkodliwe; do poprawienia w Spoonie.
+- Udane przełączenie nie zostawia wpisu w logu — potwierdzaj je wzrokowo albo przez `status()`.
+- Wersje 0.1.x nie znają `control` — **oba Maki muszą mieć tę samą wersję** Spoona (obecnie 0.2.1; 0.2.0 miał błąd: Mini po przeładowaniu przy aktywnym MacBooku błędnie uznawał lewy za swój).
 
 Szczegóły działania, protokół i przypadki brzegowe: [README DisplayKVM](https://github.com/jabbas/DisplayKVM#readme) oraz [docs/design.md](https://github.com/jabbas/DisplayKVM/blob/main/docs/design.md).
 
@@ -128,12 +133,14 @@ Obserwacja między krokami, na obu Macach: `hs -c 'return hs.inspect(spoon.Displ
 | A5 | Zamknięcie klapy MacBooka / otwarcie i odblokowanie | Mini / MacBook |
 | A6 | Uśpienie MacBooka (menu Apple) i samo uśpienie ekranu (`pmset displaysleepnow`) przy lewym u MacBooka | lewy → Mini **zanim** monitor zaśnie (ryzyko R4: jeśli zaśnie przed oddaniem — zapisz i zgłoś) |
 | A7 | Skrót `ctrl+alt+cmd+M` na Macu bez lewego | lewy → ten Mac |
-| A8 | Wi-Fi wyłączone na MacBooku, odblokowanie; potem włączenie Wi-Fi | MacBook **przejmuje lewy sam** (przez USB-C, bez sieci); po włączeniu Wi-Fi Mini włącza lustro |
-| A9 | Wypięcie kabla USB-C z MacBooka, gdy lewy jest u MacBooka | monitor sam → Mini (Auto-Switch); `owner = mini`, lustro wyłączone |
+| A8 | Sieć wyłączona na MacBooku (Wi-Fi i Ethernet monitora), odblokowanie; potem włączenie sieci | MacBook **przejmuje lewy sam** (przez USB-C, bez sieci); po włączeniu sieci Mini włącza lustro |
+| A9 | Wypięcie kabla USB-C z MacBooka, gdy lewy jest u MacBooka | monitor sam → Mini (Auto-Switch); `owner = mini`, lustro wyłączone (z Wi-Fi od razu; bez sieci po ok. 1–2 min) |
 | A10 | MacBook poza siecią > 90 s, lewy u MacBooka w stanie | Mini przejmuje w stanie, lustro wyłączone (potem skrót na MacBooku — zob. §2) |
 | A11 | Logi i `status()` na obu po testach | brak `ERROR`, `401`, `duplicate-node`; stan spójny |
 
 A1–A5 są blokujące; A6–A11 można naprawiać osobno.
+
+Wynik (październik 2026, DisplayKVM 0.2.1): A1–A7 i A9–A11 zaliczone; A8 przeprowadzony, czeka na potwierdzenie wzrokowe. Oddanie przy uśpieniu MacBooka następuje, zanim monitor zaśnie (ryzyko R4 nie wystąpiło).
 
 ---
 
@@ -145,7 +152,8 @@ A1–A5 są blokujące; A6–A11 można naprawiać osobno.
 | Logi | Logger `DisplayKVM` (start konfiguracji: logger `config`): wynik `hs -c 'return hs.console.getConsole()'` przefiltruj przez `grep -e config: -e DisplayKVM`. Więcej szczegółów: `logLevel = "debug"` w `configure`. |
 | Drugi Mac nie jest widoczny w `status()` | Sprawdź Bonjour: `dns-sd -B _displaykvm._tcp local.` (na drugim Macu powinien być widoczny ten węzeł). |
 | Brak węzłów, Bonjour milczy | Uprawnienie **Sieć lokalna** dla Hammerspoona na obu Macach; zapora na MacBooku (połączenia przychodzące dla Hammerspoona → Zezwól). |
-| `401` lub „clock skew” w logach | Różne sekrety w `localconfig.lua` albo rozjechane zegary (włącz czas sieciowy). |
+| `401` lub „clock skew” w logach | Różne sekrety w `localconfig.lua` albo rozjechane zegary (włącz czas sieciowy). Seria `401 from macbook` co 30 s na Mini, gdy MacBook śpi, to znany, jeszcze niewyjaśniony objaw (podejrzenie: krótkie wybudzenia MacBooka w tle z nieaktualnym zegarem); jeśli ustaje po wybudzeniu MacBooka, sekrety są w porządku. |
+| MacBook traci sieć, gdy lewy przechodzi na Mini | USB host lewego monitora nie jest przypięty do MacBooka — ustaw w OSD na stałe „USB-C1 (Thunderbolt 4)” (zob. §1). |
 | Brak powiadomień/ostrzeżeń, tylko wpisy w konsoli | Włącz Powiadomienia dla Hammerspoona (Ustawienia systemowe → Powiadomienia → Hammerspoon → Zezwalaj). |
 | Powiadomienie „duplicate-node” | Oba Maki mają ten sam `node` w `localconfig.lua`. |
 | Powiadomienie „cannot listen on port” | Port zajęty przez inny program lub starą instancję Hammerspoona. |
@@ -164,7 +172,7 @@ A1–A5 są blokujące; A6–A11 można naprawiać osobno.
 
 ## 6. Czego nie robić
 
-- Nie zmieniaj okablowania ani ustawień OSD monitorów (Auto-Switch Input, Power Mode, DDC/CI) bez zgody użytkownika.
+- Nie zmieniaj okablowania ani ustawień OSD monitorów (Auto-Switch Input, USB host, Power Mode, DDC/CI) bez zgody użytkownika.
 - Nie dodawaj Miniego do `control` — jego HDMI nie ma DDC, a `m1ddc` i tak zgłasza sukces.
 - Nie używaj numerów wyświetlaczy zamiast UUID.
 - Nie używaj `git clean -x` ani `-X` — usuwa `localconfig.lua` i lokalne archiwa.
